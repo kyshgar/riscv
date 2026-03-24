@@ -39,57 +39,75 @@
 // SUCH DAMAGE.
 //-----------------------------------------------------------------
 
+// ================================================================
+// 模块功能概述：RISC-V CPU 顶层模块
+//   本模块是整个RISC-V处理器的顶层连接模块，负责将以下子模块
+//   通过内部线网（wire）互连在一起：
+//     - riscv_fetch    : 取指单元，从ICache取指令并做分支预测
+//     - riscv_decode   : 译码单元，解析指令类型（ALU/LSU/MUL/DIV/CSR/Branch）
+//     - riscv_issue    : 发射单元，读寄存器堆、数据前递、冒险检测、指令分发
+//     - riscv_exec     : 执行单元（ALU），执行整数运算和分支
+//     - riscv_lsu      : 访存单元，处理Load/Store
+//     - riscv_csr      : CSR寄存器单元，处理特权指令和中断
+//     - riscv_multiplier: 乘法器（M扩展）
+//     - riscv_divider  : 除法器（M扩展）
+//     - riscv_mmu      : 内存管理单元适配层（可选，支持Sv32页表翻译）
+//   顶层本身不含时序逻辑，所有状态均在各子模块中维护。
+// ================================================================
 module riscv_core
 //-----------------------------------------------------------------
 // Params
 //-----------------------------------------------------------------
 #(
-     parameter SUPPORT_MULDIV   = 1
-    ,parameter SUPPORT_SUPER    = 0
-    ,parameter SUPPORT_MMU      = 0
-    ,parameter SUPPORT_LOAD_BYPASS = 1
-    ,parameter SUPPORT_MUL_BYPASS = 1
-    ,parameter SUPPORT_REGFILE_XILINX = 0
-    ,parameter EXTRA_DECODE_STAGE = 0
-    ,parameter MEM_CACHE_ADDR_MIN = 32'h80000000
-    ,parameter MEM_CACHE_ADDR_MAX = 32'h8fffffff
+     parameter SUPPORT_MULDIV   = 1  // 是否支持乘除法扩展（M扩展），1=支持，0=不支持
+    ,parameter SUPPORT_SUPER    = 0  // 是否支持Supervisor特权级，1=支持，0=仅支持Machine级
+    ,parameter SUPPORT_MMU      = 0  // 是否启用MMU（内存管理单元），1=启用Sv32页表翻译，0=物理地址直通
+    ,parameter SUPPORT_LOAD_BYPASS = 1  // 是否支持Load结果直接旁路到后续指令，减少流水线停顿
+    ,parameter SUPPORT_MUL_BYPASS = 1   // 是否支持乘法结果直接旁路到后续指令，减少流水线停顿
+    ,parameter SUPPORT_REGFILE_XILINX = 0  // 针对Xilinx FPGA优化的寄存器堆实现，1=使用BRAM，0=使用LUT
+    ,parameter EXTRA_DECODE_STAGE = 0   // 是否增加额外的译码流水线级，用于提高时序但增加延迟
+    ,parameter MEM_CACHE_ADDR_MIN = 32'h80000000  // 可缓存内存区域的起始地址（含），用于判断访存是否可缓存
+    ,parameter MEM_CACHE_ADDR_MAX = 32'h8fffffff  // 可缓存内存区域的结束地址（含），用于判断访存是否可缓存
 )
 //-----------------------------------------------------------------
 // Ports
 //-----------------------------------------------------------------
 (
     // Inputs
-     input           clk_i
-    ,input           rst_i
-    ,input  [ 31:0]  mem_d_data_rd_i
-    ,input           mem_d_accept_i
-    ,input           mem_d_ack_i
-    ,input           mem_d_error_i
-    ,input  [ 10:0]  mem_d_resp_tag_i
-    ,input           mem_i_accept_i
-    ,input           mem_i_valid_i
-    ,input           mem_i_error_i
-    ,input  [ 31:0]  mem_i_inst_i
-    ,input           intr_i
-    ,input  [ 31:0]  reset_vector_i
-    ,input  [ 31:0]  cpu_id_i
+     input           clk_i            // 系统时钟，上升沿触发
+    ,input           rst_i            // 异步复位，高电平有效
+    ,input  [ 31:0]  mem_d_data_rd_i  // DCache返回的读数据（32位）
+    ,input           mem_d_accept_i   // DCache接受请求的握手信号
+    ,input           mem_d_ack_i      // DCache完成请求的应答信号
+    ,input           mem_d_error_i    // DCache总线错误标志
+    ,input  [ 10:0]  mem_d_resp_tag_i // DCache响应标签，用于匹配请求
+    ,input           mem_i_accept_i   // ICache接受取指请求的握手信号
+    ,input           mem_i_valid_i    // ICache返回数据有效信号
+    ,input           mem_i_error_i    // ICache总线错误标志
+    ,input  [ 31:0]  mem_i_inst_i     // ICache返回的指令数据（32位）
+    ,input           intr_i           // 外部中断输入信号，高电平有效
+    ,input  [ 31:0]  reset_vector_i   // 复位后的程序起始地址（复位向量）
+    ,input  [ 31:0]  cpu_id_i         // CPU唯一标识号，映射到mhartid CSR
 
     // Outputs
-    ,output [ 31:0]  mem_d_addr_o
-    ,output [ 31:0]  mem_d_data_wr_o
-    ,output          mem_d_rd_o
-    ,output [  3:0]  mem_d_wr_o
-    ,output          mem_d_cacheable_o
-    ,output [ 10:0]  mem_d_req_tag_o
-    ,output          mem_d_invalidate_o
-    ,output          mem_d_writeback_o
-    ,output          mem_d_flush_o
-    ,output          mem_i_rd_o
-    ,output          mem_i_flush_o
-    ,output          mem_i_invalidate_o
-    ,output [ 31:0]  mem_i_pc_o
+    ,output [ 31:0]  mem_d_addr_o      // DCache访问地址（32位）
+    ,output [ 31:0]  mem_d_data_wr_o   // DCache写数据（32位）
+    ,output          mem_d_rd_o        // DCache读使能
+    ,output [  3:0]  mem_d_wr_o        // DCache字节写使能（4位，每位对应一个字节）
+    ,output          mem_d_cacheable_o // 当前DCache访问地址是否可缓存
+    ,output [ 10:0]  mem_d_req_tag_o   // DCache请求标签，用于匹配响应
+    ,output          mem_d_invalidate_o// DCache缓存行无效化请求
+    ,output          mem_d_writeback_o // DCache缓存行写回请求
+    ,output          mem_d_flush_o     // DCache全部写回并无效化请求
+    ,output          mem_i_rd_o        // ICache取指使能
+    ,output          mem_i_flush_o     // ICache冲刷请求（ifence指令触发）
+    ,output          mem_i_invalidate_o// ICache无效化请求
+    ,output [ 31:0]  mem_i_pc_o        // 向ICache发出的取指地址（PC值）
 );
 
+// ---------------------------------------------------------------
+// 内部线网信号声明：连接各子模块之间的数据通路和控制信号
+// ---------------------------------------------------------------
 wire           mmu_lsu_writeback_w;
 wire  [  1:0]  fetch_in_priv_w;
 wire  [  4:0]  mul_opcode_rd_idx_w;
@@ -221,6 +239,10 @@ wire           mmu_store_fault_w;
 wire           branch_exec_is_call_w;
 
 
+// ---------------------------------------------------------------
+// 执行单元：ALU整数运算、分支计算
+// 接收发射级提供的指令、操作数，输出分支请求和写回值
+// ---------------------------------------------------------------
 riscv_exec
 u_exec
 (
@@ -254,6 +276,10 @@ u_exec
 );
 
 
+// ---------------------------------------------------------------
+// 译码单元：解析取回的指令，标记指令类型（执行/访存/分支/乘除/CSR）
+// 支持可选的额外流水线级（EXTRA_DECODE_STAGE）以改善时序
+// ---------------------------------------------------------------
 riscv_decode
 #(
      .EXTRA_DECODE_STAGE(EXTRA_DECODE_STAGE)
@@ -290,6 +316,10 @@ u_decode
 );
 
 
+// ---------------------------------------------------------------
+// MMU适配层：当SUPPORT_MMU=0时物理地址直通；=1时进行Sv32页表翻译
+// 同时负责ICache和DCache的地址翻译和可缓存性判定
+// ---------------------------------------------------------------
 riscv_mmu
 #(
      .MEM_CACHE_ADDR_MAX(MEM_CACHE_ADDR_MAX)
@@ -359,6 +389,9 @@ u_mmu
 );
 
 
+// ---------------------------------------------------------------
+// 访存单元：处理Load/Store指令，管理内存请求和写回
+// ---------------------------------------------------------------
 riscv_lsu
 #(
      .MEM_CACHE_ADDR_MAX(MEM_CACHE_ADDR_MAX)
@@ -403,6 +436,10 @@ u_lsu
 );
 
 
+// ---------------------------------------------------------------
+// CSR单元：处理特权指令（ecall/ebreak/xret）、中断、异常
+// 输出MMU控制信号（satp、priv、sum、mxr）和分支请求
+// ---------------------------------------------------------------
 riscv_csr
 #(
      .SUPPORT_SUPER(SUPPORT_SUPER)
@@ -451,6 +488,9 @@ u_csr
 );
 
 
+// ---------------------------------------------------------------
+// 乘法器：处理MUL/MULH/MULHSU/MULHU指令（M扩展）
+// ---------------------------------------------------------------
 riscv_multiplier
 u_mul
 (
@@ -473,6 +513,9 @@ u_mul
 );
 
 
+// ---------------------------------------------------------------
+// 除法器：处理DIV/DIVU/REM/REMU指令（M扩展），多周期完成
+// ---------------------------------------------------------------
 riscv_divider
 u_div
 (
@@ -495,6 +538,10 @@ u_div
 );
 
 
+// ---------------------------------------------------------------
+// 发射单元：读寄存器堆、数据前递/旁路、RAW冒险检测
+// 负责将指令分发到执行/访存/乘法/除法/CSR各执行单元
+// ---------------------------------------------------------------
 riscv_issue
 #(
      .SUPPORT_REGFILE_XILINX(SUPPORT_REGFILE_XILINX)
@@ -603,6 +650,9 @@ u_issue
 );
 
 
+// ---------------------------------------------------------------
+// 取指单元：向ICache发送取指请求，处理分支跳转和指令缺页异常
+// ---------------------------------------------------------------
 riscv_fetch
 #(
      .SUPPORT_MMU(SUPPORT_MMU)

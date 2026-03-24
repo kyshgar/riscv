@@ -39,116 +39,151 @@
 // SUCH DAMAGE.
 //-----------------------------------------------------------------
 
+// ================================================================
+// 模块功能概述：指令发射级（Issue Stage）
+//   本模块是流水线中指令发射（调度）的核心，完成以下功能：
+//
+//   1. 特权级跟踪：维护当前执行特权级 priv_x_q，响应CSR分支后更新
+//
+//   2. 分支仲裁：CSR分支（ecall/ebreak/xret等）优先于执行单元分支
+//      输出统一的 branch_request_o 和 branch_pc_o
+//
+//   3. 指令字段提取：从fetch_instr_i中提取rs1/rs2/rd索引
+//
+//   4. 流水线状态跟踪（riscv_pipe_ctrl）：
+//      - 跟踪E1/E2/WB各级的目的寄存器和结果
+//      - 检测RAW数据冒险，产生 pipe_stall_raw_w 停顿信号
+//      - 维护异常信息传播
+//
+//   5. 阻塞事件处理：
+//      - div_pending_q：除法操作进行中时阻止新指令发射
+//      - csr_pending_q：CSR操作进行中时阻止新指令发射
+//
+//   6. 计分板（Scoreboard）调度：
+//      - 跟踪流水线中各寄存器的"忙"状态
+//      - 检测源操作数寄存器（ra/rb）和目的寄存器（rd）是否存在冒险
+//      - Load后一拍禁止发射MUL/DIV/CSR指令（结构冒险规避）
+//
+//   7. 数据前递（Forwarding/Bypass）：
+//      - 支持从E1/E2/WB三个流水线级前递结果
+//      - 优先级：E1 > E2 > WB > 寄存器堆读出值
+//      - 寄存器0（x0）始终返回0
+//
+//   8. 指令分发：将同一指令广播到EXE/LSU/MUL/CSR各执行单元
+//      （各单元根据自身valid信号决定是否执行）
+//
+//   9. 调试接口：在Verilator仿真下提供指令提交跟踪函数
+// ================================================================
 module riscv_issue
 //-----------------------------------------------------------------
 // Params
 //-----------------------------------------------------------------
 #(
-     parameter SUPPORT_MULDIV   = 1
-    ,parameter SUPPORT_DUAL_ISSUE = 1
-    ,parameter SUPPORT_LOAD_BYPASS = 1
-    ,parameter SUPPORT_MUL_BYPASS = 1
-    ,parameter SUPPORT_REGFILE_XILINX = 0
+     parameter SUPPORT_MULDIV   = 1          // 是否支持乘除法，影响mul/div_opcode_valid_o有效性
+    ,parameter SUPPORT_DUAL_ISSUE = 1        // 是否支持双发射（本版本保留参数，实际单发射）
+    ,parameter SUPPORT_LOAD_BYPASS = 1       // 是否支持Load结果旁路（=0时Load结果需等到E2级才可用）
+    ,parameter SUPPORT_MUL_BYPASS = 1        // 是否支持MUL结果旁路（=0时MUL结果需等到E2级才可用）
+    ,parameter SUPPORT_REGFILE_XILINX = 0    // 针对Xilinx FPGA优化的寄存器堆实现
 )
 //-----------------------------------------------------------------
 // Ports
 //-----------------------------------------------------------------
 (
     // Inputs
-     input           clk_i
-    ,input           rst_i
-    ,input           fetch_valid_i
-    ,input  [ 31:0]  fetch_instr_i
-    ,input  [ 31:0]  fetch_pc_i
-    ,input           fetch_fault_fetch_i
-    ,input           fetch_fault_page_i
-    ,input           fetch_instr_exec_i
-    ,input           fetch_instr_lsu_i
-    ,input           fetch_instr_branch_i
-    ,input           fetch_instr_mul_i
-    ,input           fetch_instr_div_i
-    ,input           fetch_instr_csr_i
-    ,input           fetch_instr_rd_valid_i
-    ,input           fetch_instr_invalid_i
-    ,input           branch_exec_request_i
-    ,input           branch_exec_is_taken_i
-    ,input           branch_exec_is_not_taken_i
-    ,input  [ 31:0]  branch_exec_source_i
-    ,input           branch_exec_is_call_i
-    ,input           branch_exec_is_ret_i
-    ,input           branch_exec_is_jmp_i
-    ,input  [ 31:0]  branch_exec_pc_i
-    ,input           branch_d_exec_request_i
-    ,input  [ 31:0]  branch_d_exec_pc_i
-    ,input  [  1:0]  branch_d_exec_priv_i
-    ,input           branch_csr_request_i
-    ,input  [ 31:0]  branch_csr_pc_i
-    ,input  [  1:0]  branch_csr_priv_i
-    ,input  [ 31:0]  writeback_exec_value_i
-    ,input           writeback_mem_valid_i
-    ,input  [ 31:0]  writeback_mem_value_i
-    ,input  [  5:0]  writeback_mem_exception_i
-    ,input  [ 31:0]  writeback_mul_value_i
-    ,input           writeback_div_valid_i
-    ,input  [ 31:0]  writeback_div_value_i
-    ,input  [ 31:0]  csr_result_e1_value_i
-    ,input           csr_result_e1_write_i
-    ,input  [ 31:0]  csr_result_e1_wdata_i
-    ,input  [  5:0]  csr_result_e1_exception_i
-    ,input           lsu_stall_i
-    ,input           take_interrupt_i
+     input           clk_i                       // 系统时钟
+    ,input           rst_i                       // 异步复位，高电平有效
+    ,input           fetch_valid_i               // 译码级输出的指令有效信号
+    ,input  [ 31:0]  fetch_instr_i               // 待发射的指令字（32位原始编码）
+    ,input  [ 31:0]  fetch_pc_i                  // 待发射指令的程序计数器值
+    ,input           fetch_fault_fetch_i         // 取指总线错误（指令访问错误异常）
+    ,input           fetch_fault_page_i          // 取指页表错误（指令页访问错误异常）
+    ,input           fetch_instr_exec_i          // 指令类型：ALU整数运算（执行单元）
+    ,input           fetch_instr_lsu_i           // 指令类型：Load/Store（访存单元）
+    ,input           fetch_instr_branch_i        // 指令类型：分支/跳转
+    ,input           fetch_instr_mul_i           // 指令类型：乘法
+    ,input           fetch_instr_div_i           // 指令类型：除法
+    ,input           fetch_instr_csr_i           // 指令类型：CSR访问
+    ,input           fetch_instr_rd_valid_i      // 指令是否写目的寄存器（rd有效时需在计分板中标记）
+    ,input           fetch_instr_invalid_i       // 指令非法（非法指令异常）
+    ,input           branch_exec_request_i       // 执行单元发出的分支请求（分支指令结果）
+    ,input           branch_exec_is_taken_i      // 分支是否跳转（已跳转）
+    ,input           branch_exec_is_not_taken_i  // 分支是否不跳转
+    ,input  [ 31:0]  branch_exec_source_i        // 分支源地址（用于BTB更新）
+    ,input           branch_exec_is_call_i       // 分支为调用指令（JAL/JALR用于返回地址栈）
+    ,input           branch_exec_is_ret_i        // 分支为返回指令
+    ,input           branch_exec_is_jmp_i        // 分支为无条件跳转
+    ,input  [ 31:0]  branch_exec_pc_i            // 分支目标地址
+    ,input           branch_d_exec_request_i     // 执行单元提前预测的分支请求（E1级快速分支）
+    ,input  [ 31:0]  branch_d_exec_pc_i          // 提前预测分支目标地址
+    ,input  [  1:0]  branch_d_exec_priv_i        // 提前预测分支的特权级
+    ,input           branch_csr_request_i        // CSR单元发出的控制流变更请求（ecall/ebreak/xret/中断）
+    ,input  [ 31:0]  branch_csr_pc_i             // CSR分支目标地址（异常/中断入口或返回地址）
+    ,input  [  1:0]  branch_csr_priv_i           // CSR分支后的目标特权级
+    ,input  [ 31:0]  writeback_exec_value_i      // 执行单元E1级写回值（用于数据前递）
+    ,input           writeback_mem_valid_i       // 访存单元写回有效
+    ,input  [ 31:0]  writeback_mem_value_i       // 访存单元写回值（Load结果）
+    ,input  [  5:0]  writeback_mem_exception_i   // 访存单元异常码
+    ,input  [ 31:0]  writeback_mul_value_i       // 乘法单元写回值
+    ,input           writeback_div_valid_i       // 除法单元写回有效（除法完成信号）
+    ,input  [ 31:0]  writeback_div_value_i       // 除法单元写回值
+    ,input  [ 31:0]  csr_result_e1_value_i       // CSR单元E1级读出值（用于数据前递）
+    ,input           csr_result_e1_write_i       // CSR单元E1级是否写CSR
+    ,input  [ 31:0]  csr_result_e1_wdata_i       // CSR单元E1级写入数据
+    ,input  [  5:0]  csr_result_e1_exception_i   // CSR单元E1级异常码
+    ,input           lsu_stall_i                 // 访存单元发出的流水线停顿请求
+    ,input           take_interrupt_i            // CSR单元通知需要处理中断（此周期抑制新指令发射）
 
     // Outputs
-    ,output          fetch_accept_o
-    ,output          branch_request_o
-    ,output [ 31:0]  branch_pc_o
-    ,output [  1:0]  branch_priv_o
-    ,output          exec_opcode_valid_o
-    ,output          lsu_opcode_valid_o
-    ,output          csr_opcode_valid_o
-    ,output          mul_opcode_valid_o
-    ,output          div_opcode_valid_o
-    ,output [ 31:0]  opcode_opcode_o
-    ,output [ 31:0]  opcode_pc_o
-    ,output          opcode_invalid_o
-    ,output [  4:0]  opcode_rd_idx_o
-    ,output [  4:0]  opcode_ra_idx_o
-    ,output [  4:0]  opcode_rb_idx_o
-    ,output [ 31:0]  opcode_ra_operand_o
-    ,output [ 31:0]  opcode_rb_operand_o
-    ,output [ 31:0]  lsu_opcode_opcode_o
-    ,output [ 31:0]  lsu_opcode_pc_o
-    ,output          lsu_opcode_invalid_o
-    ,output [  4:0]  lsu_opcode_rd_idx_o
-    ,output [  4:0]  lsu_opcode_ra_idx_o
-    ,output [  4:0]  lsu_opcode_rb_idx_o
-    ,output [ 31:0]  lsu_opcode_ra_operand_o
-    ,output [ 31:0]  lsu_opcode_rb_operand_o
-    ,output [ 31:0]  mul_opcode_opcode_o
-    ,output [ 31:0]  mul_opcode_pc_o
-    ,output          mul_opcode_invalid_o
-    ,output [  4:0]  mul_opcode_rd_idx_o
-    ,output [  4:0]  mul_opcode_ra_idx_o
-    ,output [  4:0]  mul_opcode_rb_idx_o
-    ,output [ 31:0]  mul_opcode_ra_operand_o
-    ,output [ 31:0]  mul_opcode_rb_operand_o
-    ,output [ 31:0]  csr_opcode_opcode_o
-    ,output [ 31:0]  csr_opcode_pc_o
-    ,output          csr_opcode_invalid_o
-    ,output [  4:0]  csr_opcode_rd_idx_o
-    ,output [  4:0]  csr_opcode_ra_idx_o
-    ,output [  4:0]  csr_opcode_rb_idx_o
-    ,output [ 31:0]  csr_opcode_ra_operand_o
-    ,output [ 31:0]  csr_opcode_rb_operand_o
-    ,output          csr_writeback_write_o
-    ,output [ 11:0]  csr_writeback_waddr_o
-    ,output [ 31:0]  csr_writeback_wdata_o
-    ,output [  5:0]  csr_writeback_exception_o
-    ,output [ 31:0]  csr_writeback_exception_pc_o
-    ,output [ 31:0]  csr_writeback_exception_addr_o
-    ,output          exec_hold_o
-    ,output          mul_hold_o
-    ,output          interrupt_inhibit_o
+    ,output          fetch_accept_o              // 向译码级发出的接受信号（握手确认，可以移动到下一指令）
+    ,output          branch_request_o            // 向取指单元发出的分支请求（CSR分支或E1快速分支）
+    ,output [ 31:0]  branch_pc_o                 // 分支目标地址（CSR分支优先）
+    ,output [  1:0]  branch_priv_o               // 分支后目标特权级
+    ,output          exec_opcode_valid_o         // 执行单元（ALU）指令有效
+    ,output          lsu_opcode_valid_o          // 访存单元指令有效（中断时抑制）
+    ,output          csr_opcode_valid_o          // CSR单元指令有效（中断时抑制）
+    ,output          mul_opcode_valid_o          // 乘法单元指令有效
+    ,output          div_opcode_valid_o          // 除法单元指令有效
+    ,output [ 31:0]  opcode_opcode_o             // 发射的指令字（到执行单元）
+    ,output [ 31:0]  opcode_pc_o                 // 发射指令的PC值
+    ,output          opcode_invalid_o            // 发射指令是否非法
+    ,output [  4:0]  opcode_rd_idx_o             // 目的寄存器索引（rd）
+    ,output [  4:0]  opcode_ra_idx_o             // 源寄存器1索引（rs1）
+    ,output [  4:0]  opcode_rb_idx_o             // 源寄存器2索引（rs2）
+    ,output [ 31:0]  opcode_ra_operand_o         // 源寄存器1操作数值（含数据前递后的最新值）
+    ,output [ 31:0]  opcode_rb_operand_o         // 源寄存器2操作数值（含数据前递后的最新值）
+    ,output [ 31:0]  lsu_opcode_opcode_o         // 访存单元指令字（与opcode_opcode_o相同）
+    ,output [ 31:0]  lsu_opcode_pc_o             // 访存单元指令PC
+    ,output          lsu_opcode_invalid_o        // 访存单元指令非法标志
+    ,output [  4:0]  lsu_opcode_rd_idx_o         // 访存单元目的寄存器索引
+    ,output [  4:0]  lsu_opcode_ra_idx_o         // 访存单元rs1索引
+    ,output [  4:0]  lsu_opcode_rb_idx_o         // 访存单元rs2索引
+    ,output [ 31:0]  lsu_opcode_ra_operand_o     // 访存单元rs1操作数
+    ,output [ 31:0]  lsu_opcode_rb_operand_o     // 访存单元rs2操作数
+    ,output [ 31:0]  mul_opcode_opcode_o         // 乘法单元指令字
+    ,output [ 31:0]  mul_opcode_pc_o             // 乘法单元指令PC
+    ,output          mul_opcode_invalid_o        // 乘法单元指令非法标志
+    ,output [  4:0]  mul_opcode_rd_idx_o         // 乘法单元目的寄存器索引
+    ,output [  4:0]  mul_opcode_ra_idx_o         // 乘法单元rs1索引
+    ,output [  4:0]  mul_opcode_rb_idx_o         // 乘法单元rs2索引
+    ,output [ 31:0]  mul_opcode_ra_operand_o     // 乘法单元rs1操作数
+    ,output [ 31:0]  mul_opcode_rb_operand_o     // 乘法单元rs2操作数
+    ,output [ 31:0]  csr_opcode_opcode_o         // CSR单元指令字
+    ,output [ 31:0]  csr_opcode_pc_o             // CSR单元指令PC
+    ,output          csr_opcode_invalid_o        // CSR单元指令非法标志（包含非法指令异常触发）
+    ,output [  4:0]  csr_opcode_rd_idx_o         // CSR单元目的寄存器索引
+    ,output [  4:0]  csr_opcode_ra_idx_o         // CSR单元rs1索引
+    ,output [  4:0]  csr_opcode_rb_idx_o         // CSR单元rs2索引
+    ,output [ 31:0]  csr_opcode_ra_operand_o     // CSR单元rs1操作数
+    ,output [ 31:0]  csr_opcode_rb_operand_o     // CSR单元rs2操作数
+    ,output          csr_writeback_write_o       // CSR写回使能（提交阶段写CSR）
+    ,output [ 11:0]  csr_writeback_waddr_o       // CSR写回地址
+    ,output [ 31:0]  csr_writeback_wdata_o       // CSR写回数据
+    ,output [  5:0]  csr_writeback_exception_o   // 提交阶段异常码
+    ,output [ 31:0]  csr_writeback_exception_pc_o   // 异常触发时的PC值
+    ,output [ 31:0]  csr_writeback_exception_addr_o // 异常触发时的访问地址（用于mtval）
+    ,output          exec_hold_o                 // 向执行单元发出的暂停信号（=stall_w）
+    ,output          mul_hold_o                  // 向乘法单元发出的暂停信号（=stall_w）
+    ,output          interrupt_inhibit_o         // 中断抑制信号：CSR操作进行中时抑制中断响应
 );
 
 
