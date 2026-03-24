@@ -38,32 +38,43 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF 
 // SUCH DAMAGE.
 //-----------------------------------------------------------------
+// ============================================================
+// 模块: riscv_regfile
+// 功能: RISC-V 通用寄存器堆，实现 RV32I 规范中的 x0-x31 共32个寄存器
+//       提供 2 个异步读端口（ra0/rb0）和 1 个同步写端口（rd0）
+//       x0（零寄存器）永远读出0，写入操作对其无效
+//       可通过参数选择两种实现方式：
+//         SUPPORT_REGFILE_XILINX=0: 标准触发器实现（通用，仿真友好）
+//         SUPPORT_REGFILE_XILINX=1: Xilinx RAM16X1D 原语实现（FPGA面积优化）
+// ============================================================
 module riscv_regfile
 //-----------------------------------------------------------------
 // Params
 //-----------------------------------------------------------------
 #(
-     parameter SUPPORT_REGFILE_XILINX = 0
+     parameter SUPPORT_REGFILE_XILINX = 0 // 0=触发器实现（默认），1=Xilinx RAM16X1D原语实现
 )
 //-----------------------------------------------------------------
 // Ports
 //-----------------------------------------------------------------
 (
     // Inputs
-     input           clk_i
-    ,input           rst_i
-    ,input  [  4:0]  rd0_i
-    ,input  [ 31:0]  rd0_value_i
-    ,input  [  4:0]  ra0_i
-    ,input  [  4:0]  rb0_i
+     input           clk_i        // 系统时钟（写端口使用）
+    ,input           rst_i        // 同步复位（高有效），触发器实现时清零所有寄存器
+    ,input  [  4:0]  rd0_i        // 写端口目标寄存器索引（x0-x31，写x0无效）
+    ,input  [ 31:0]  rd0_value_i  // 写端口数据输入
+    ,input  [  4:0]  ra0_i        // 读端口A寄存器索引（rs1，x0-x31）
+    ,input  [  4:0]  rb0_i        // 读端口B寄存器索引（rs2，x0-x31）
 
     // Outputs
-    ,output [ 31:0]  ra0_value_o
-    ,output [ 31:0]  rb0_value_o
+    ,output [ 31:0]  ra0_value_o  // 读端口A数据输出（rs1值，x0返回0）
+    ,output [ 31:0]  rb0_value_o  // 读端口B数据输出（rs2值，x0返回0）
 );
 
 //-----------------------------------------------------------------
 // Xilinx specific register file (single issue)
+// 当 SUPPORT_REGFILE_XILINX=1 时，实例化 riscv_xilinx_2r1w 模块
+// 利用 Xilinx FPGA 的 LUT RAM 原语，面积更小、读延迟为零
 //-----------------------------------------------------------------
 generate
 if (SUPPORT_REGFILE_XILINX)
@@ -87,40 +98,43 @@ begin: REGFILE_XILINX_SINGLE
 end
 //-----------------------------------------------------------------
 // Flop based register file
+// 当 SUPPORT_REGFILE_XILINX=0 时，使用标准D触发器实现寄存器堆
+// 每个寄存器独立实例，仿真可见（有利于调试），综合后映射为FF
 //-----------------------------------------------------------------
 else
 begin: REGFILE
-    reg [31:0] reg_r1_q;
-    reg [31:0] reg_r2_q;
-    reg [31:0] reg_r3_q;
-    reg [31:0] reg_r4_q;
-    reg [31:0] reg_r5_q;
-    reg [31:0] reg_r6_q;
-    reg [31:0] reg_r7_q;
-    reg [31:0] reg_r8_q;
-    reg [31:0] reg_r9_q;
-    reg [31:0] reg_r10_q;
-    reg [31:0] reg_r11_q;
-    reg [31:0] reg_r12_q;
-    reg [31:0] reg_r13_q;
-    reg [31:0] reg_r14_q;
-    reg [31:0] reg_r15_q;
-    reg [31:0] reg_r16_q;
-    reg [31:0] reg_r17_q;
-    reg [31:0] reg_r18_q;
-    reg [31:0] reg_r19_q;
-    reg [31:0] reg_r20_q;
-    reg [31:0] reg_r21_q;
-    reg [31:0] reg_r22_q;
-    reg [31:0] reg_r23_q;
-    reg [31:0] reg_r24_q;
-    reg [31:0] reg_r25_q;
-    reg [31:0] reg_r26_q;
-    reg [31:0] reg_r27_q;
-    reg [31:0] reg_r28_q;
-    reg [31:0] reg_r29_q;
-    reg [31:0] reg_r30_q;
-    reg [31:0] reg_r31_q;
+    // x1-x31 寄存器存储（x0不需要存储，读出时硬件返回0）
+    reg [31:0] reg_r1_q;   // x1  (ra) 返回地址寄存器
+    reg [31:0] reg_r2_q;   // x2  (sp) 栈指针
+    reg [31:0] reg_r3_q;   // x3  (gp) 全局指针
+    reg [31:0] reg_r4_q;   // x4  (tp) 线程指针
+    reg [31:0] reg_r5_q;   // x5  (t0) 临时寄存器0
+    reg [31:0] reg_r6_q;   // x6  (t1) 临时寄存器1
+    reg [31:0] reg_r7_q;   // x7  (t2) 临时寄存器2
+    reg [31:0] reg_r8_q;   // x8  (s0/fp) 保存寄存器0/帧指针
+    reg [31:0] reg_r9_q;   // x9  (s1) 保存寄存器1
+    reg [31:0] reg_r10_q;  // x10 (a0) 函数参数/返回值0
+    reg [31:0] reg_r11_q;  // x11 (a1) 函数参数/返回值1
+    reg [31:0] reg_r12_q;  // x12 (a2) 函数参数2
+    reg [31:0] reg_r13_q;  // x13 (a3) 函数参数3
+    reg [31:0] reg_r14_q;  // x14 (a4) 函数参数4
+    reg [31:0] reg_r15_q;  // x15 (a5) 函数参数5
+    reg [31:0] reg_r16_q;  // x16 (a6) 函数参数6
+    reg [31:0] reg_r17_q;  // x17 (a7) 函数参数7
+    reg [31:0] reg_r18_q;  // x18 (s2) 保存寄存器2
+    reg [31:0] reg_r19_q;  // x19 (s3) 保存寄存器3
+    reg [31:0] reg_r20_q;  // x20 (s4) 保存寄存器4
+    reg [31:0] reg_r21_q;  // x21 (s5) 保存寄存器5
+    reg [31:0] reg_r22_q;  // x22 (s6) 保存寄存器6
+    reg [31:0] reg_r23_q;  // x23 (s7) 保存寄存器7
+    reg [31:0] reg_r24_q;  // x24 (s8) 保存寄存器8
+    reg [31:0] reg_r25_q;  // x25 (s9) 保存寄存器9
+    reg [31:0] reg_r26_q;  // x26 (s10) 保存寄存器10
+    reg [31:0] reg_r27_q;  // x27 (s11) 保存寄存器11
+    reg [31:0] reg_r28_q;  // x28 (t3) 临时寄存器3
+    reg [31:0] reg_r29_q;  // x29 (t4) 临时寄存器4
+    reg [31:0] reg_r30_q;  // x30 (t5) 临时寄存器5
+    reg [31:0] reg_r31_q;  // x31 (t6) 临时寄存器6
 
     // Simulation friendly names
     wire [31:0] x0_zero_w = 32'b0;
@@ -160,7 +174,8 @@ begin: REGFILE
     // Flop based register File (for simulation)
     //-----------------------------------------------------------------
 
-    // Synchronous register write back
+    // 同步写：时钟上升沿写入目标寄存器，复位时清零所有寄存器
+    // x0 不在写逻辑中（索引从1开始），天然实现只读零特性
     always @ (posedge clk_i )
     if (rst_i)
     begin
@@ -232,13 +247,15 @@ begin: REGFILE
     end
 
     //-----------------------------------------------------------------
-    // Asynchronous read
+    // Asynchronous read（异步读：无需时钟，立即输出对应寄存器值）
+    // 使用 case 语句实现多路选择器，将寄存器索引映射到对应寄存器值
+    // default 分支（含 x0=0）返回零，实现 x0 硬连线为零
     //-----------------------------------------------------------------
-    reg [31:0] ra0_value_r;
-    reg [31:0] rb0_value_r;
+    reg [31:0] ra0_value_r; // 读端口A组合输出
+    reg [31:0] rb0_value_r; // 读端口B组合输出
     always @ *
     begin
-        case (ra0_i)
+        case (ra0_i) // rs1 读端口选择
         5'd1: ra0_value_r = reg_r1_q;
         5'd2: ra0_value_r = reg_r2_q;
         5'd3: ra0_value_r = reg_r3_q;
@@ -270,10 +287,10 @@ begin: REGFILE
         5'd29: ra0_value_r = reg_r29_q;
         5'd30: ra0_value_r = reg_r30_q;
         5'd31: ra0_value_r = reg_r31_q;
-        default : ra0_value_r = 32'h00000000;
+        default : ra0_value_r = 32'h00000000; // x0及非法地址返回0
         endcase
 
-        case (rb0_i)
+        case (rb0_i) // rs2 读端口选择
         5'd1: rb0_value_r = reg_r1_q;
         5'd2: rb0_value_r = reg_r2_q;
         5'd3: rb0_value_r = reg_r3_q;
@@ -305,7 +322,7 @@ begin: REGFILE
         5'd29: rb0_value_r = reg_r29_q;
         5'd30: rb0_value_r = reg_r30_q;
         5'd31: rb0_value_r = reg_r31_q;
-        default : rb0_value_r = 32'h00000000;
+        default : rb0_value_r = 32'h00000000; // x0及非法地址返回0
         endcase
     end
 
@@ -313,7 +330,8 @@ begin: REGFILE
     assign rb0_value_o = rb0_value_r;
 
     //-------------------------------------------------------------
-    // get_register: Read register file
+    // get_register: Read register file（Verilator仿真接口：读寄存器值）
+    // 供仿真测试框架通过 DPI 直接读取寄存器内容，不影响硬件综合
     //-------------------------------------------------------------
     `ifdef verilator
     function [31:0] get_register; /*verilator public*/
@@ -351,12 +369,15 @@ begin: REGFILE
         5'd29: get_register = reg_r29_q;
         5'd30: get_register = reg_r30_q;
         5'd31: get_register = reg_r31_q;
-        default : get_register = 32'h00000000;
+        default : get_register = 32'h00000000; // x0返回0
         endcase
     end
     endfunction
     //-------------------------------------------------------------
-    // set_register: Write register file
+    // set_register: Write register file（Verilator仿真接口：写寄存器值）
+    // 注意：Verilog 函数（function）内只允许组合逻辑赋值（=），不允许非阻塞赋值（<=）
+    //       向时序寄存器写值需要使用 task 或直接通过正常流水线写回端口操作。
+    //       此处写入实现被注释保留，作为接口存根（stub），仅供未来扩展参考。
     //-------------------------------------------------------------
     function set_register; /*verilator public*/
         input [4:0] r;

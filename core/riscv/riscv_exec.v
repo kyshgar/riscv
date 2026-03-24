@@ -39,35 +39,48 @@
 // SUCH DAMAGE.
 //-----------------------------------------------------------------
 
+/*
+ * 模块功能概述：riscv_exec —— RISC-V 执行单元（EX 阶段）
+ *
+ * 本模块负责 RISC-V 流水线的执行阶段，主要完成以下工作：
+ *   1. 立即数解码：根据指令格式（I/S/B/U/J 型）从指令字中提取并符号扩展立即数；
+ *   2. ALU 操作选择：根据指令类型选择 ALU 功能码及操作数，驱动下级 riscv_alu 子模块；
+ *   3. 分支条件判断与目标地址计算：
+ *        - JAL  : 无条件跳转，目标 = PC + J 型立即数；
+ *        - JALR : 间接跳转，目标 = (rs1 + I 型立即数) & ~1；
+ *        - Bxx  : 条件分支（BEQ/BNE/BLT/BGE/BLTU/BGEU），目标 = PC + B 型立即数；
+ *   4. 将 ALU 结果打拍（D 触发器）后输出至写回总线（writeback_value_o）；
+ *   5. 向前级（分支预测/BTB）反馈分支请求、跳转方向及目标地址。
+ */
 module riscv_exec
 (
     // Inputs
-     input           clk_i
-    ,input           rst_i
-    ,input           opcode_valid_i
-    ,input  [ 31:0]  opcode_opcode_i
-    ,input  [ 31:0]  opcode_pc_i
-    ,input           opcode_invalid_i
-    ,input  [  4:0]  opcode_rd_idx_i
-    ,input  [  4:0]  opcode_ra_idx_i
-    ,input  [  4:0]  opcode_rb_idx_i
-    ,input  [ 31:0]  opcode_ra_operand_i
-    ,input  [ 31:0]  opcode_rb_operand_i
-    ,input           hold_i
+     input           clk_i              // 时钟信号
+    ,input           rst_i              // 同步/异步复位（高有效）
+    ,input           opcode_valid_i     // 当前指令有效标志
+    ,input  [ 31:0]  opcode_opcode_i    // 32 位原始指令字
+    ,input  [ 31:0]  opcode_pc_i        // 当前指令的 PC 值
+    ,input           opcode_invalid_i   // 指令非法标志（来自译码级）
+    ,input  [  4:0]  opcode_rd_idx_i    // 目的寄存器索引 rd
+    ,input  [  4:0]  opcode_ra_idx_i    // 源寄存器索引 rs1
+    ,input  [  4:0]  opcode_rb_idx_i    // 源寄存器索引 rs2
+    ,input  [ 31:0]  opcode_ra_operand_i // rs1 操作数值（含前递结果）
+    ,input  [ 31:0]  opcode_rb_operand_i // rs2 操作数值（含前递结果）
+    ,input           hold_i             // 流水线暂停信号（高有效时禁止 ALU 结果打拍）
 
     // Outputs
-    ,output          branch_request_o
-    ,output          branch_is_taken_o
-    ,output          branch_is_not_taken_o
-    ,output [ 31:0]  branch_source_o
-    ,output          branch_is_call_o
-    ,output          branch_is_ret_o
-    ,output          branch_is_jmp_o
-    ,output [ 31:0]  branch_pc_o
-    ,output          branch_d_request_o
-    ,output [ 31:0]  branch_d_pc_o
-    ,output [  1:0]  branch_d_priv_o
-    ,output [ 31:0]  writeback_value_o
+    ,output          branch_request_o      // 分支请求（已确认的跳转或不跳转结果，打拍后输出）
+    ,output          branch_is_taken_o     // 分支已跳转标志（打拍后输出）
+    ,output          branch_is_not_taken_o // 分支未跳转标志（打拍后输出）
+    ,output [ 31:0]  branch_source_o       // 分支指令自身的 PC（用于 BTB 更新）
+    ,output          branch_is_call_o      // 本次分支为函数调用（rd=ra=x1）
+    ,output          branch_is_ret_o       // 本次分支为函数返回（JALR，rs1=x1，偏移=0）
+    ,output          branch_is_jmp_o       // 本次分支为普通跳转（非 call/ret）
+    ,output [ 31:0]  branch_pc_o           // 分支目标地址（打拍后输出）
+    ,output          branch_d_request_o    // 当拍的直接分支请求（组合逻辑，不打拍）
+    ,output [ 31:0]  branch_d_pc_o         // 当拍的直接分支目标地址
+    ,output [  1:0]  branch_d_priv_o       // 当拍的目标特权级（本实现固定为 0）
+    ,output [ 31:0]  writeback_value_o     // 写回寄存器堆的结果值（ALU 结果打拍）
 );
 
 
@@ -78,14 +91,24 @@ module riscv_exec
 `include "riscv_defs.v"
 
 //-------------------------------------------------------------
-// Opcode decode
+// Opcode decode —— 立即数解码
+// 根据 RISC-V 规范从 32 位指令字中提取各类型立即数
 //-------------------------------------------------------------
+// U 型立即数：高20位来自指令 [31:12]，低12位置零（用于 LUI/AUIPC）
 reg [31:0]  imm20_r;
+// I 型立即数：指令 [31:20] 的12位有符号扩展（用于 ADDI/LOAD/JALR 等）
 reg [31:0]  imm12_r;
+// B 型立即数：条件分支偏移，13位有符号扩展，位域分散在指令中需重新拼接
 reg [31:0]  bimm_r;
+// J 型立即数：JAL 跳转偏移，21位有符号扩展，位域同样分散需拼接
 reg [31:0]  jimm20_r;
+// 移位量：指令 [24:20]，用于 SLLI/SRLI/SRAI 等立即数移位指令
 reg [4:0]   shamt_r;
 
+// 组合逻辑：从指令字中解码各格式立即数
+// I 型：imm[11:0]  = opcode[31:20]，符号扩展至32位
+// B 型：imm[12|10:5|4:1|11] 分散于指令中，需按规范拼接后左移1位
+// J 型：imm[20|10:1|11|19:12] 分散于指令中，需按规范拼接后左移1位
 always @ *
 begin
     imm20_r     = {opcode_opcode_i[31:12], 12'b0};
@@ -96,12 +119,25 @@ begin
 end
 
 //-------------------------------------------------------------
-// Execute - ALU operations
+// Execute - ALU operations —— ALU 操作选择
+// 根据指令类型选择 ALU 功能码（alu_func_r）及两个操作数
+// R 型指令：操作数均来自寄存器；I 型指令：操作数 B 来自立即数
 //-------------------------------------------------------------
+// ALU 功能码选择信号（见 riscv_defs.v 中 ALU_xxx 宏定义）
 reg [3:0]  alu_func_r;
+// ALU 操作数 A（一般为 rs1，LUI 为立即数，JAL/JALR 为 PC）
 reg [31:0] alu_input_a_r;
+// ALU 操作数 B（R 型为 rs2，I 型为立即数，JAL/JALR 固定为 4）
 reg [31:0] alu_input_b_r;
 
+// 组合逻辑：ALU 操作选择
+// 对每条 R/I 型整数运算指令进行掩码匹配，选择对应功能码与操作数
+// - R 型（ADD/SUB/AND/OR/XOR/SLL/SRL/SRA/SLT/SLTU）：A=rs1, B=rs2
+// - I 型（ADDI/ANDI/ORI/XORI/SLTI/SLTIU）：A=rs1, B=imm12
+// - 移位立即数（SLLI/SRLI/SRAI）：A=rs1, B={27'b0, shamt}
+// - LUI：直接将 imm20 传给 A，ALU 功能码为 NONE（直通）
+// - AUIPC：A=PC, B=imm20，ALU 做加法得到 PC+imm20
+// - JAL/JALR：A=PC, B=4，ALU 计算返回地址 PC+4
 always @ *
 begin
     alu_func_r     = `ALU_NONE;
@@ -242,7 +278,8 @@ end
 
 
 //-------------------------------------------------------------
-// ALU
+// ALU —— 算术逻辑单元实例化
+// 将功能码和操作数送入 riscv_alu，得到组合逻辑结果 alu_p_w
 //-------------------------------------------------------------
 wire [31:0]  alu_p_w;
 riscv_alu
@@ -255,21 +292,27 @@ u_alu
 );
 
 //-------------------------------------------------------------
-// Flop ALU output
+// Flop ALU output —— ALU 结果寄存（打拍）
+// 在时钟上升沿将 ALU 组合逻辑结果锁存到 result_q
+// hold_i 高电平时流水线暂停，result_q 保持不变
 //-------------------------------------------------------------
-reg [31:0] result_q;
+reg [31:0] result_q; // 已锁存的 ALU 结果，直接连接到写回总线
 always @ (posedge clk_i or posedge rst_i)
 if (rst_i)
     result_q  <= 32'b0;
 else if (~hold_i)
     result_q <= alu_p_w;
 
+// 写回值：将锁存后的 ALU 结果输出至寄存器堆写回总线
 assign writeback_value_o  = result_q;
 
 //-----------------------------------------------------------------
 // less_than_signed: Less than operator (signed)
+// 有符号小于比较函数
 // Inputs: x = left operand, y = right operand
 // Return: (int)x < (int)y
+// 实现原理：若符号位不同，符号位为 1 的操作数更小；
+//           若符号位相同，通过差值的符号位判断大小关系
 //-----------------------------------------------------------------
 function [0:0] less_than_signed;
     input  [31:0] x;
@@ -286,8 +329,10 @@ endfunction
 
 //-----------------------------------------------------------------
 // greater_than_signed: Greater than operator (signed)
+// 有符号大于比较函数
 // Inputs: x = left operand, y = right operand
 // Return: (int)x > (int)y
+// 实现原理：与 less_than_signed 对称，比较 y-x 的符号位
 //-----------------------------------------------------------------
 function [0:0] greater_than_signed;
     input  [31:0] x;
@@ -303,15 +348,25 @@ end
 endfunction
 
 //-------------------------------------------------------------
-// Execute - Branch operations
+// Execute - Branch operations —— 分支条件判断与目标计算
+// 判断当前指令是否为分支/跳转指令，并计算跳转目标地址
 //-------------------------------------------------------------
-reg        branch_r;
-reg        branch_taken_r;
-reg [31:0] branch_target_r;
-reg        branch_call_r;
-reg        branch_ret_r;
-reg        branch_jmp_r;
+reg        branch_r;        // 当前指令为分支/跳转类型（组合逻辑）
+reg        branch_taken_r;  // 分支跳转条件成立（组合逻辑）
+reg [31:0] branch_target_r; // 分支目标地址（组合逻辑）
+reg        branch_call_r;   // 是否为函数调用（JAL/JALR 且 rd=x1）
+reg        branch_ret_r;    // 是否为函数返回（JALR，rs1=x1，偏移=0）
+reg        branch_jmp_r;    // 是否为普通跳转（非 call 也非 ret）
 
+// 组合逻辑：分支类型识别与目标地址计算
+// - JAL  : 无条件，目标 = PC + J 型立即数；rd=x1 时标记为 call
+// - JALR : 无条件，目标 = (rs1 + I 型立即数) & ~1；rs1=x1 且偏移=0 时为 ret
+// - BEQ  : 相等跳转，目标 = PC + B 型立即数
+// - BNE  : 不等跳转
+// - BLT  : 有符号小于跳转
+// - BGE  : 有符号大于等于跳转
+// - BLTU : 无符号小于跳转
+// - BGEU : 无符号大于等于跳转
 always @ *
 begin
     branch_r        = 1'b0;
@@ -373,14 +428,17 @@ begin
     end
 end
 
-reg        branch_taken_q;
-reg        branch_ntaken_q;
-reg [31:0] pc_x_q;
-reg [31:0] pc_m_q;
-reg        branch_call_q;
-reg        branch_ret_q;
-reg        branch_jmp_q;
+// 分支结果打拍寄存器：将本周期组合逻辑判断结果锁存到下一拍输出
+reg        branch_taken_q;  // 已锁存：分支跳转
+reg        branch_ntaken_q; // 已锁存：分支未跳转
+reg [31:0] pc_x_q;          // 已锁存：下一 PC（跳转目标或 PC+4）
+reg [31:0] pc_m_q;          // 已锁存：分支指令自身 PC（用于 BTB 更新）
+reg        branch_call_q;   // 已锁存：函数调用标志
+reg        branch_ret_q;    // 已锁存：函数返回标志
+reg        branch_jmp_q;    // 已锁存：普通跳转标志
 
+// 时序逻辑：在时钟上升沿锁存分支判断结果
+// opcode_valid_i 有效时才更新，否则保持复位后的 0 值
 always @ (posedge clk_i or posedge rst_i)
 if (rst_i)
 begin
@@ -403,15 +461,18 @@ begin
     pc_m_q           <= opcode_pc_i;
 end
 
+// 打拍后的分支请求输出：taken 或 not-taken 均需通知前级更新 BTB
 assign branch_request_o   = branch_taken_q | branch_ntaken_q;
 assign branch_is_taken_o  = branch_taken_q;
 assign branch_is_not_taken_o = branch_ntaken_q;
-assign branch_source_o    = pc_m_q;
-assign branch_pc_o        = pc_x_q;
+assign branch_source_o    = pc_m_q;   // 分支指令的 PC
+assign branch_pc_o        = pc_x_q;   // 分支目标（or PC+4）
 assign branch_is_call_o   = branch_call_q;
 assign branch_is_ret_o    = branch_ret_q;
 assign branch_is_jmp_o    = branch_jmp_q;
 
+// 当拍（组合逻辑）的直接分支请求：供前端在当拍即重定向取指
+// branch_d_request_o 在分支确实跳转时有效，无需等到下一拍
 assign branch_d_request_o = (branch_r && opcode_valid_i && branch_taken_r);
 assign branch_d_pc_o      = branch_target_r;
 assign branch_d_priv_o    = 2'b0; // don't care

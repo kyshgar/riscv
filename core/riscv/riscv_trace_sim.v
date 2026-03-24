@@ -40,15 +40,25 @@
 //-----------------------------------------------------------------
 `include "riscv_defs.v"
 
+// ============================================================
+// 模块: riscv_trace_sim
+// 功能: 仿真用指令追踪/反汇编模块（Simulation Trace Module）
+//   - 仅在 Verilator 仿真环境下编译（`ifdef verilator 保护）
+//   - 当指令有效时，将 32 位指令码反汇编为助记符字符串，
+//     并提取操作数寄存器名称和立即数，便于波形调试和日志输出
+//   - 本模块不含任何时序逻辑，不影响综合结果
+//   - 仅用于仿真验证，不可综合到实际硬件
+// ============================================================
 module riscv_trace_sim
 (
-     input                        valid_i
-    ,input  [31:0]                pc_i
-    ,input  [31:0]                opcode_i
+     input                        valid_i    // 指令有效标志（来自提交级或执行级）
+    ,input  [31:0]                pc_i       // 当前指令的程序计数器值
+    ,input  [31:0]                opcode_i   // 当前指令的 32 位编码
 );
 
 //-----------------------------------------------------------------
 // get_regname_str: Convert register number to string
+// 寄存器编号转名称字符串：将 5 位寄存器编号转换为 ABI 名称（如 x1->ra, x2->sp）
 //-----------------------------------------------------------------
 `ifdef verilator
 function [79:0] get_regname_str;
@@ -92,26 +102,32 @@ end
 endfunction
 
 //-------------------------------------------------------------------
-// Debug strings
+// Debug strings（调试字符串寄存器）
+// 以下寄存器仅用于仿真波形观察，记录当前指令的反汇编信息
 //-------------------------------------------------------------------
-reg [79:0] dbg_inst_str;
-reg [79:0] dbg_inst_ra;
-reg [79:0] dbg_inst_rb;
-reg [79:0] dbg_inst_rd;
-reg [31:0] dbg_inst_imm;
-reg [31:0] dbg_inst_pc;
+reg [79:0] dbg_inst_str;  // 指令助记符字符串（如 "addi", "lw" 等）
+reg [79:0] dbg_inst_ra;   // 源寄存器 rs1 的 ABI 名称
+reg [79:0] dbg_inst_rb;   // 源寄存器 rs2 的 ABI 名称
+reg [79:0] dbg_inst_rd;   // 目标寄存器 rd 的 ABI 名称
+reg [31:0] dbg_inst_imm;  // 指令立即数（已符号扩展）
+reg [31:0] dbg_inst_pc;   // 当前指令的 PC 值
 
-wire [4:0] ra_idx_w = opcode_i[19:15];
-wire [4:0] rb_idx_w = opcode_i[24:20];
-wire [4:0] rd_idx_w = opcode_i[11:7];
+// 从指令码中提取寄存器字段索引（RISC-V 标准字段位置）
+wire [4:0] ra_idx_w = opcode_i[19:15]; // rs1 字段
+wire [4:0] rb_idx_w = opcode_i[24:20]; // rs2 字段
+wire [4:0] rd_idx_w = opcode_i[11:7];  // rd  字段
 
-`define DBG_IMM_IMM20     {opcode_i[31:12], 12'b0}
-`define DBG_IMM_IMM12     {{20{opcode_i[31]}}, opcode_i[31:20]}
-`define DBG_IMM_BIMM      {{19{opcode_i[31]}}, opcode_i[31], opcode_i[7], opcode_i[30:25], opcode_i[11:8], 1'b0}
-`define DBG_IMM_JIMM20    {{12{opcode_i[31]}}, opcode_i[19:12], opcode_i[20], opcode_i[30:25], opcode_i[24:21], 1'b0}
-`define DBG_IMM_STOREIMM  {{20{opcode_i[31]}}, opcode_i[31:25], opcode_i[11:7]}
-`define DBG_IMM_SHAMT     opcode_i[24:20]
+// 各类立即数格式的提取宏定义（按 RISC-V 指令格式）
+`define DBG_IMM_IMM20     {opcode_i[31:12], 12'b0}                                                       // U-type：高 20 位立即数
+`define DBG_IMM_IMM12     {{20{opcode_i[31]}}, opcode_i[31:20]}                                          // I-type：12 位符号扩展立即数
+`define DBG_IMM_BIMM      {{19{opcode_i[31]}}, opcode_i[31], opcode_i[7], opcode_i[30:25], opcode_i[11:8], 1'b0}  // B-type：分支偏移量
+`define DBG_IMM_JIMM20    {{12{opcode_i[31]}}, opcode_i[19:12], opcode_i[20], opcode_i[30:25], opcode_i[24:21], 1'b0} // J-type：JAL 偏移量
+`define DBG_IMM_STOREIMM  {{20{opcode_i[31]}}, opcode_i[31:25], opcode_i[11:7]}                          // S-type：存储偏移量
+`define DBG_IMM_SHAMT     opcode_i[24:20]                                                                // 移位量（shamt）
 
+// 反汇编组合逻辑：根据指令码模式匹配，填充调试字符串和操作数
+// 第一个 case：匹配指令助记符（dbg_inst_str）
+// 第二个 case：匹配操作数格式，提取立即数并修正寄存器显示
 always @ *
 begin
     dbg_inst_str = "-";
@@ -127,6 +143,7 @@ begin
         dbg_inst_rb  = get_regname_str(rb_idx_w);
         dbg_inst_rd  = get_regname_str(rd_idx_w);
 
+        // 第一段 case：根据指令编码输出对应助记符字符串
         case (1'b1)
             ((opcode_i & `INST_ANDI_MASK) == `INST_ANDI)   : dbg_inst_str = "andi";
             ((opcode_i & `INST_ADDI_MASK) == `INST_ADDI)   : dbg_inst_str = "addi";
@@ -186,8 +203,11 @@ begin
             ((opcode_i & `INST_IFENCE_MASK) == `INST_IFENCE)  : dbg_inst_str = "fence.i";
         endcase
 
+        // 第二段 case：根据指令类型修正操作数显示格式和立即数值
+        // 不同指令格式（I/S/U/J/B 型）对应不同的操作数组合
         case (1'b1)
 
+            // I-type 立即数运算和 CSR 指令：rd = rs1 op imm12，无 rs2
             ((opcode_i & `INST_ADDI_MASK) == `INST_ADDI) ,  // addi
             ((opcode_i & `INST_ANDI_MASK) == `INST_ANDI) ,  // andi
             ((opcode_i & `INST_SLTI_MASK) == `INST_SLTI) ,  // slti
@@ -205,6 +225,7 @@ begin
                 dbg_inst_imm = `DBG_IMM_IMM12;
             end
 
+            // 移位立即数指令：shamt 为 5 位无符号数，无 rs2
             ((opcode_i & `INST_SLLI_MASK) == `INST_SLLI) , // slli
             ((opcode_i & `INST_SRLI_MASK) == `INST_SRLI) , // srli
             ((opcode_i & `INST_SRAI_MASK) == `INST_SRAI) : // srai
@@ -213,6 +234,7 @@ begin
                 dbg_inst_imm = {27'b0, `DBG_IMM_SHAMT};
             end
 
+            // U-type：LUI 无操作数寄存器，仅有高 20 位立即数
             ((opcode_i & `INST_LUI_MASK) == `INST_LUI) : // lui
             begin
                 dbg_inst_ra  = "-";
@@ -220,6 +242,7 @@ begin
                 dbg_inst_imm = `DBG_IMM_IMM20;
             end
 
+            // AUIPC：rs1 显示为 "pc"（与 PC 相加），无 rs2
             ((opcode_i & `INST_AUIPC_MASK) == `INST_AUIPC) : // auipc
             begin
                 dbg_inst_ra  = "pc";
@@ -227,6 +250,8 @@ begin
                 dbg_inst_imm = `DBG_IMM_IMM20;
             end   
 
+            // J-type：JAL 目标地址 = PC + J立即数
+            // 若 rd=ra(x1)，则特殊显示为 "call"
             ((opcode_i & `INST_JAL_MASK) == `INST_JAL) :  // jal
             begin
                 dbg_inst_ra  = "-";
@@ -237,6 +262,9 @@ begin
                     dbg_inst_str = "call";
             end
 
+            // JALR：目标地址 = rs1 + imm12
+            // 若 rs1=ra(x1) 且偏移为 0 -> "ret"；
+            // 若 rd=ra(x1) -> "call (R)"（通过寄存器的调用）
             ((opcode_i & `INST_JALR_MASK) == `INST_JALR) : // jalr
             begin
                 dbg_inst_rb  = "-";
@@ -248,7 +276,7 @@ begin
                     dbg_inst_str = "call (R)";
             end
 
-            // lb lh lw lbu lhu lwu
+            // lb lh lw lbu lhu lwu（Load 指令）：地址 = rs1 + imm12，无 rs2
             ((opcode_i & `INST_LB_MASK) == `INST_LB) ,
             ((opcode_i & `INST_LH_MASK) == `INST_LH) ,
             ((opcode_i & `INST_LW_MASK) == `INST_LW) ,
@@ -260,7 +288,7 @@ begin
                 dbg_inst_imm = `DBG_IMM_IMM12;
             end 
 
-            // sb sh sw
+            // sb sh sw（Store 指令）：S-type，无目标寄存器 rd，偏移量分散在指令高低位
             ((opcode_i & `INST_SB_MASK) == `INST_SB) ,
             ((opcode_i & `INST_SH_MASK) == `INST_SH) ,
             ((opcode_i & `INST_SW_MASK) == `INST_SW) :
