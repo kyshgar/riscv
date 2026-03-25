@@ -108,135 +108,164 @@ module riscv_core
 // ---------------------------------------------------------------
 // 内部线网信号声明：连接各子模块之间的数据通路和控制信号
 // ---------------------------------------------------------------
-wire           mmu_lsu_writeback_w;
-wire  [  1:0]  fetch_in_priv_w;
-wire  [  4:0]  mul_opcode_rd_idx_w;
-wire           mmu_flush_w;
-wire  [ 31:0]  lsu_opcode_pc_w;
-wire           fetch_accept_w;
-wire  [  4:0]  csr_opcode_rd_idx_w;
-wire  [ 31:0]  branch_exec_source_w;
-wire  [ 31:0]  csr_opcode_rb_operand_w;
-wire  [ 31:0]  writeback_div_value_w;
-wire           csr_opcode_valid_w;
-wire           branch_csr_request_w;
-wire  [ 31:0]  mmu_ifetch_inst_w;
-wire  [ 31:0]  opcode_pc_w;
-wire  [  4:0]  opcode_rb_idx_w;
-wire           mmu_lsu_error_w;
-wire           mul_opcode_valid_w;
-wire           mmu_mxr_w;
-wire  [  1:0]  branch_d_exec_priv_w;
-wire           mmu_ifetch_valid_w;
-wire           csr_opcode_invalid_w;
-wire  [  5:0]  csr_writeback_exception_w;
-wire           fetch_instr_mul_w;
-wire           branch_exec_is_ret_w;
-wire  [ 31:0]  csr_writeback_exception_addr_w;
-wire  [  3:0]  mmu_lsu_wr_w;
-wire           fetch_in_fault_w;
-wire           branch_request_w;
-wire  [ 31:0]  csr_opcode_pc_w;
-wire           writeback_mem_valid_w;
-wire  [  5:0]  csr_result_e1_exception_w;
-wire  [ 31:0]  branch_csr_pc_w;
-wire  [ 31:0]  mmu_lsu_data_wr_w;
-wire           fetch_fault_page_w;
-wire  [ 10:0]  mmu_lsu_resp_tag_w;
-wire  [ 10:0]  mmu_lsu_req_tag_w;
-wire  [ 31:0]  opcode_ra_operand_w;
-wire           squash_decode_w;
-wire           fetch_dec_fault_page_w;
-wire  [ 31:0]  mul_opcode_opcode_w;
-wire           exec_hold_w;
-wire           fetch_instr_invalid_w;
-wire  [ 31:0]  branch_pc_w;
-wire  [  4:0]  mul_opcode_ra_idx_w;
-wire  [  4:0]  csr_opcode_rb_idx_w;
-wire           lsu_stall_w;
-wire           branch_exec_is_not_taken_w;
-wire  [ 31:0]  branch_exec_pc_w;
-wire  [ 31:0]  opcode_opcode_w;
-wire  [ 31:0]  mul_opcode_pc_w;
-wire           branch_d_exec_request_w;
-wire  [ 31:0]  mul_opcode_ra_operand_w;
-wire           branch_exec_is_taken_w;
-wire           fetch_dec_fault_fetch_w;
-wire           fetch_dec_valid_w;
-wire           fetch_fault_fetch_w;
-wire           lsu_opcode_invalid_w;
-wire  [ 31:0]  mmu_lsu_addr_w;
-wire           mul_hold_w;
-wire           mmu_ifetch_accept_w;
-wire           mmu_lsu_ack_w;
-wire  [ 31:0]  fetch_pc_w;
-wire           mmu_ifetch_invalidate_w;
-wire  [ 31:0]  mul_opcode_rb_operand_w;
-wire  [  1:0]  branch_csr_priv_w;
-wire           branch_exec_request_w;
-wire  [ 31:0]  lsu_opcode_ra_operand_w;
-wire           div_opcode_valid_w;
-wire  [  1:0]  branch_priv_w;
-wire           mmu_lsu_rd_w;
-wire  [ 31:0]  fetch_dec_pc_w;
-wire           interrupt_inhibit_w;
-wire           mmu_ifetch_error_w;
-wire  [  5:0]  writeback_mem_exception_w;
-wire           fetch_instr_lsu_w;
-wire  [  1:0]  mmu_priv_d_w;
-wire  [  4:0]  opcode_ra_idx_w;
-wire  [ 31:0]  csr_opcode_ra_operand_w;
-wire  [ 31:0]  writeback_mem_value_w;
-wire           writeback_div_valid_w;
-wire  [  4:0]  mul_opcode_rb_idx_w;
-wire           opcode_invalid_w;
-wire           fetch_instr_branch_w;
-wire  [ 31:0]  mmu_ifetch_pc_w;
-wire           mmu_ifetch_rd_w;
-wire           mmu_ifetch_flush_w;
-wire  [  4:0]  lsu_opcode_rd_idx_w;
-wire  [ 31:0]  lsu_opcode_opcode_w;
-wire           mmu_load_fault_w;
-wire  [ 31:0]  mmu_satp_w;
-wire  [ 31:0]  csr_result_e1_wdata_w;
-wire  [ 31:0]  opcode_rb_operand_w;
-wire           mmu_lsu_invalidate_w;
-wire           fetch_dec_accept_w;
-wire  [  4:0]  csr_opcode_ra_idx_w;
-wire           ifence_w;
-wire           fetch_instr_exec_w;
-wire  [  4:0]  opcode_rd_idx_w;
-wire  [ 31:0]  csr_writeback_wdata_w;
-wire           csr_writeback_write_w;
-wire           take_interrupt_w;
-wire  [ 31:0]  csr_result_e1_value_w;
-wire  [ 31:0]  branch_d_exec_pc_w;
-wire           fetch_valid_w;
-wire  [ 11:0]  csr_writeback_waddr_w;
-wire           branch_exec_is_jmp_w;
-wire           mmu_lsu_cacheable_w;
-wire           fetch_instr_csr_w;
-wire           lsu_opcode_valid_w;
-wire  [ 31:0]  fetch_dec_instr_w;
-wire           csr_result_e1_write_w;
-wire  [ 31:0]  csr_opcode_opcode_w;
-wire           fetch_instr_div_w;
-wire  [ 31:0]  fetch_instr_w;
-wire           mul_opcode_invalid_w;
-wire           fetch_instr_rd_valid_w;
-wire  [ 31:0]  mmu_lsu_data_rd_w;
-wire           exec_opcode_valid_w;
-wire  [ 31:0]  writeback_mul_value_w;
-wire           mmu_lsu_flush_w;
-wire  [  4:0]  lsu_opcode_rb_idx_w;
-wire           mmu_lsu_accept_w;
-wire  [ 31:0]  lsu_opcode_rb_operand_w;
-wire           mmu_sum_w;
-wire  [ 31:0]  writeback_exec_value_w;
-wire  [  4:0]  lsu_opcode_ra_idx_w;
-wire  [ 31:0]  csr_writeback_exception_pc_w;
-wire           mmu_store_fault_w;
-wire           branch_exec_is_call_w;
+// --- 取指单元 (Fetch) 输出信号 ---
+wire           fetch_accept_w;                  // 发射级接受译码输出的握手信号
+wire           fetch_valid_w;                   // 译码后指令有效标志
+wire  [ 31:0]  fetch_instr_w;                   // 译码后的指令字
+wire  [ 31:0]  fetch_pc_w;                      // 译码后的指令PC
+wire           fetch_fault_fetch_w;             // 译码后：取指总线错误标志
+wire           fetch_fault_page_w;              // 译码后：取指缺页异常标志
+wire           fetch_instr_exec_w;              // 指令类型标记：ALU/分支执行类
+wire           fetch_instr_lsu_w;               // 指令类型标记：Load/Store访存类
+wire           fetch_instr_branch_w;            // 指令类型标记：分支类
+wire           fetch_instr_mul_w;               // 指令类型标记：乘法类
+wire           fetch_instr_div_w;               // 指令类型标记：除法类
+wire           fetch_instr_csr_w;               // 指令类型标记：CSR操作类
+wire           fetch_instr_rd_valid_w;          // 指令有目的寄存器写回
+wire           fetch_instr_invalid_w;           // 指令非法/未识别标志
+wire           fetch_dec_valid_w;               // 取指到译码：指令有效
+wire  [ 31:0]  fetch_dec_instr_w;               // 取指到译码：指令字
+wire  [ 31:0]  fetch_dec_pc_w;                  // 取指到译码：指令PC
+wire           fetch_dec_fault_fetch_w;         // 取指到译码：总线错误标志
+wire           fetch_dec_fault_page_w;          // 取指到译码：缺页异常标志
+wire           fetch_dec_accept_w;              // 译码级接受取指输出的握手信号
+wire           fetch_in_fault_w;                // MMU返回的取指页错误
+wire  [  1:0]  fetch_in_priv_w;                 // 取指时的特权级别
+wire           squash_decode_w;                 // 冲刷译码级流水线（分支跳转时）
+
+// --- 发射单元 (Issue) 公共操作码输出 ---
+wire  [ 31:0]  opcode_opcode_w;                 // 当前指令编码（共用总线）
+wire  [ 31:0]  opcode_pc_w;                     // 当前指令PC（共用总线）
+wire           opcode_invalid_w;                // 当前指令非法标志（共用总线）
+wire  [  4:0]  opcode_rd_idx_w;                 // 目的寄存器索引（共用总线）
+wire  [  4:0]  opcode_ra_idx_w;                 // 源寄存器A索引（共用总线）
+wire  [  4:0]  opcode_rb_idx_w;                 // 源寄存器B索引（共用总线）
+wire  [ 31:0]  opcode_ra_operand_w;             // 源寄存器A操作数（含前递）
+wire  [ 31:0]  opcode_rb_operand_w;             // 源寄存器B操作数（含前递）
+
+// --- 执行单元 (Exec) 信号 ---
+wire           exec_opcode_valid_w;             // 发射到执行：指令有效
+wire           exec_hold_w;                     // 暂停执行级（等待多周期操作）
+wire  [ 31:0]  writeback_exec_value_w;          // 执行单元写回结果
+
+// --- 执行级分支信号 ---
+wire           branch_exec_request_w;           // 执行级发出分支请求
+wire           branch_exec_is_taken_w;          // 条件分支已跳转
+wire           branch_exec_is_not_taken_w;      // 条件分支未跳转
+wire  [ 31:0]  branch_exec_source_w;            // 分支指令源地址
+wire           branch_exec_is_call_w;           // 分支为函数调用（JAL/JALR rd=x1）
+wire           branch_exec_is_ret_w;            // 分支为函数返回（JALR rs1=x1）
+wire           branch_exec_is_jmp_w;            // 分支为无条件跳转
+wire  [ 31:0]  branch_exec_pc_w;                // 分支目标地址
+wire           branch_d_exec_request_w;         // 延迟分支请求
+wire  [ 31:0]  branch_d_exec_pc_w;              // 延迟分支目标地址
+wire  [  1:0]  branch_d_exec_priv_w;            // 延迟分支目标特权级
+
+// --- 发射级最终分支输出 ---
+wire           branch_request_w;                // 最终分支跳转请求（送取指）
+wire  [ 31:0]  branch_pc_w;                     // 最终分支目标PC（送取指）
+wire  [  1:0]  branch_priv_w;                   // 最终分支目标特权级
+
+// --- LSU（访存单元）操作码信号 ---
+wire           lsu_opcode_valid_w;              // 发射到LSU：指令有效
+wire  [ 31:0]  lsu_opcode_opcode_w;             // 发射到LSU：指令编码
+wire  [ 31:0]  lsu_opcode_pc_w;                 // 发射到LSU：指令PC
+wire           lsu_opcode_invalid_w;            // 发射到LSU：指令非法标志
+wire  [  4:0]  lsu_opcode_rd_idx_w;             // 发射到LSU：目的寄存器索引
+wire  [  4:0]  lsu_opcode_ra_idx_w;             // 发射到LSU：源寄存器A索引
+wire  [  4:0]  lsu_opcode_rb_idx_w;             // 发射到LSU：源寄存器B索引
+wire  [ 31:0]  lsu_opcode_ra_operand_w;         // 发射到LSU：源操作数A（基地址）
+wire  [ 31:0]  lsu_opcode_rb_operand_w;         // 发射到LSU：源操作数B（存储数据）
+wire           lsu_stall_w;                     // LSU请求流水线暂停（等待内存响应）
+
+// --- LSU写回信号 ---
+wire           writeback_mem_valid_w;           // LSU写回有效
+wire  [ 31:0]  writeback_mem_value_w;           // LSU写回数据
+wire  [  5:0]  writeback_mem_exception_w;       // LSU写回异常码
+
+// --- CSR单元操作码信号 ---
+wire           csr_opcode_valid_w;              // 发射到CSR：指令有效
+wire  [ 31:0]  csr_opcode_opcode_w;             // 发射到CSR：指令编码
+wire  [ 31:0]  csr_opcode_pc_w;                 // 发射到CSR：指令PC
+wire           csr_opcode_invalid_w;            // 发射到CSR：指令非法标志
+wire  [  4:0]  csr_opcode_rd_idx_w;             // 发射到CSR：目的寄存器索引
+wire  [  4:0]  csr_opcode_ra_idx_w;             // 发射到CSR：源寄存器A索引
+wire  [  4:0]  csr_opcode_rb_idx_w;             // 发射到CSR：源寄存器B索引
+wire  [ 31:0]  csr_opcode_ra_operand_w;         // 发射到CSR：源操作数A
+wire  [ 31:0]  csr_opcode_rb_operand_w;         // 发射到CSR：源操作数B
+
+// --- CSR结果和写回信号 ---
+wire  [ 31:0]  csr_result_e1_value_w;           // CSR E1级读取结果值
+wire           csr_result_e1_write_w;           // CSR E1级有写回操作
+wire  [ 31:0]  csr_result_e1_wdata_w;           // CSR E1级写回数据
+wire  [  5:0]  csr_result_e1_exception_w;       // CSR E1级异常码
+wire           csr_writeback_write_w;           // CSR写回阶段写使能
+wire  [ 11:0]  csr_writeback_waddr_w;           // CSR写回阶段目标地址
+wire  [ 31:0]  csr_writeback_wdata_w;           // CSR写回阶段写入数据
+wire  [  5:0]  csr_writeback_exception_w;       // CSR写回阶段异常码
+wire  [ 31:0]  csr_writeback_exception_pc_w;    // CSR写回阶段异常PC
+wire  [ 31:0]  csr_writeback_exception_addr_w;  // CSR写回阶段异常地址（访存地址）
+
+// --- CSR分支和控制信号 ---
+wire           branch_csr_request_w;            // CSR发出分支请求（中断/异常/xret）
+wire  [ 31:0]  branch_csr_pc_w;                 // CSR分支目标PC（trap入口/返回地址）
+wire  [  1:0]  branch_csr_priv_w;               // CSR分支目标特权级
+wire           take_interrupt_w;                // 中断待处理标志
+wire           ifence_w;                        // 指令栅栏，冲刷ICache
+wire           interrupt_inhibit_w;             // 抑制中断（临界区保护）
+
+// --- 乘法器操作码信号 ---
+wire           mul_opcode_valid_w;              // 发射到乘法器：指令有效
+wire  [ 31:0]  mul_opcode_opcode_w;             // 发射到乘法器：指令编码
+wire  [ 31:0]  mul_opcode_pc_w;                 // 发射到乘法器：指令PC
+wire           mul_opcode_invalid_w;            // 发射到乘法器：指令非法标志
+wire  [  4:0]  mul_opcode_rd_idx_w;             // 发射到乘法器：目的寄存器索引
+wire  [  4:0]  mul_opcode_ra_idx_w;             // 发射到乘法器：源寄存器A索引
+wire  [  4:0]  mul_opcode_rb_idx_w;             // 发射到乘法器：源寄存器B索引
+wire  [ 31:0]  mul_opcode_ra_operand_w;         // 发射到乘法器：源操作数A
+wire  [ 31:0]  mul_opcode_rb_operand_w;         // 发射到乘法器：源操作数B
+wire           mul_hold_w;                      // 暂停乘法器（等待写回）
+wire  [ 31:0]  writeback_mul_value_w;           // 乘法器写回结果
+
+// --- 除法器信号 ---
+wire           div_opcode_valid_w;              // 发射到除法器：指令有效
+wire           writeback_div_valid_w;           // 除法器写回有效（多周期完成）
+wire  [ 31:0]  writeback_div_value_w;           // 除法器写回结果
+
+// --- MMU到ICache接口信号 ---
+wire           mmu_ifetch_rd_w;                 // MMU到ICache：取指读使能
+wire           mmu_ifetch_flush_w;              // MMU到ICache：冲刷请求
+wire           mmu_ifetch_invalidate_w;         // MMU到ICache：无效化请求
+wire  [ 31:0]  mmu_ifetch_pc_w;                 // MMU到ICache：取指地址
+wire           mmu_ifetch_accept_w;             // ICache到MMU：接受取指请求
+wire           mmu_ifetch_valid_w;              // ICache到MMU：返回数据有效
+wire           mmu_ifetch_error_w;              // ICache到MMU：总线错误
+wire  [ 31:0]  mmu_ifetch_inst_w;               // ICache到MMU：返回的指令字
+
+// --- MMU到DCache接口信号 ---
+wire  [ 31:0]  mmu_lsu_addr_w;                  // LSU到MMU：访存地址
+wire  [ 31:0]  mmu_lsu_data_wr_w;               // LSU到MMU：写数据
+wire           mmu_lsu_rd_w;                    // LSU到MMU：读使能
+wire  [  3:0]  mmu_lsu_wr_w;                    // LSU到MMU：字节写使能
+wire           mmu_lsu_cacheable_w;             // LSU到MMU：地址可缓存标志
+wire  [ 10:0]  mmu_lsu_req_tag_w;               // LSU到MMU：请求标签
+wire           mmu_lsu_invalidate_w;            // LSU到MMU：缓存行无效化
+wire           mmu_lsu_writeback_w;             // LSU到MMU：缓存行写回
+wire           mmu_lsu_flush_w;                 // LSU到MMU：全部写回并无效化
+wire  [ 31:0]  mmu_lsu_data_rd_w;               // MMU到LSU：读返回数据
+wire           mmu_lsu_accept_w;                // MMU到LSU：接受访存请求
+wire           mmu_lsu_ack_w;                   // MMU到LSU：完成应答
+wire           mmu_lsu_error_w;                 // MMU到LSU：总线错误
+wire  [ 10:0]  mmu_lsu_resp_tag_w;              // MMU到LSU：响应标签
+
+// --- MMU控制信号（来自CSR） ---
+wire  [  1:0]  mmu_priv_d_w;                    // 数据访问特权级（Machine/Supervisor/User）
+wire           mmu_sum_w;                       // 允许Supervisor访问User页面
+wire           mmu_mxr_w;                       // 允许从可执行页面加载数据
+wire           mmu_flush_w;                     // 冲刷TLB（sfence.vma触发）
+wire  [ 31:0]  mmu_satp_w;                      // 页表基址寄存器（satp）
+wire           mmu_load_fault_w;                // MMU页表翻译：加载页错误
+wire           mmu_store_fault_w;               // MMU页表翻译：存储页错误
 
 
 // ---------------------------------------------------------------
