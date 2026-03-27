@@ -1,22 +1,54 @@
 //-----------------------------------------------------------------
 //                        Now Developing by RuikeV
-//                            push 
+//                            push
 //-----------------------------------------------------------------
 
 // ================================================================
 // 模块功能概述：RISC-V CPU 顶层模块
 //   本模块是整个RISC-V处理器的顶层连接模块，负责将以下子模块
-//   通过内部线网（wire）互连在一起：
-//     - riscv_fetch    : 取指单元，从ICache取指令并做分支预测
-//     - riscv_decode   : 译码单元，解析指令类型（ALU/LSU/MUL/DIV/CSR/Branch）
-//     - riscv_issue    : 发射单元，读寄存器堆、数据前递、冒险检测、指令分发
-//     - riscv_exec     : 执行单元（ALU），执行整数运算和分支
-//     - riscv_lsu      : 访存单元，处理Load/Store
-//     - riscv_csr      : CSR寄存器单元，处理特权指令和中断
-//     - riscv_multiplier: 乘法器（M扩展）
-//     - riscv_divider  : 除法器（M扩展）
-//     - riscv_mmu      : 内存管理单元适配层（可选，支持Sv32页表翻译）
+//   通过内部线网（wire）互连在一起。
 //   顶层本身不含时序逻辑，所有状态均在各子模块中维护。
+//
+// ======================== 流水线模块地图 ========================
+//
+//  阶段              文件                       功能
+//  ─────────────────────────────────────────────────────────────
+//  [共用定义]        riscv_defs.v               操作码/掩码/常量定义
+//  [顶层连线]        riscv_core.v               纯连线，例化所有子模块
+//
+//  Stage 1 - IF      riscv_fetch.v              PC 管理、Skid Buffer、
+//                                               分支重定向缓冲
+//
+//  Stage 2 - ID      riscv_decode.v             译码级包装（可选流水寄存器）
+//                    riscv_decoder.v            纯组合指令分类器
+//                                               （被 decode 例化）
+//
+//  Stage 3 - Issue   riscv_issue.v              发射：记分牌、冒险检测、
+//            / E1                                操作数读取
+//                    riscv_regfile.v            通用寄存器堆（2R1W）
+//                    riscv_xilinx_2r1w.v        Xilinx BRAM 寄存器堆
+//                                               （Pango 平台不使用）
+//                    riscv_exec.v               E1 执行：立即数解码、
+//                                               ALU 操作数选择、分支判断
+//                    riscv_alu.v                纯组合 ALU（算术/逻辑/
+//                                               移位/比较）
+//                    riscv_csr.v                CSR 指令处理 + 异常编码
+//                    riscv_lsu.v                LSU：E1 地址计算 +
+//                                               E2 数据对齐
+//
+//  Stage 4 - E2      riscv_pipe_ctrl.v          流水线控制：E1→E2→WB
+//            (Mem)                               状态跟踪、stall/squash
+//                    riscv_multiplier.v         2-3 级流水乘法器
+//                    riscv_divider.v            多周期除法器
+//                    riscv_mmu.v                MMU（SUPPORT_MMU=0
+//                                               时纯直通）
+//
+//  Stage 5 - WB      riscv_csr_regfile.v        CSR 物理寄存器 +
+//                                               异常/中断状态机
+//                    riscv_pipe_ctrl.v          （WB 写回控制也在此）
+//
+//  [仿真辅助]        riscv_trace_sim.v          反汇编 trace（仅仿真）
+//
 // ================================================================
 module riscv_core
 //-----------------------------------------------------------------
