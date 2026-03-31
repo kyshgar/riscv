@@ -27,6 +27,7 @@
 `define INST_ADDI_MASK 32'h707f
 
 // slti（立即数有符号小于置位，I型，funct3=010）
+`define INST_SLTI 32'h2013
 `define INST_SLTI_MASK 32'h707f
 
 // sltiu（立即数无符号小于置位，I型，funct3=011）
