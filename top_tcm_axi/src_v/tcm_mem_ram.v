@@ -30,6 +30,12 @@ module tcm_mem_ram
 reg [31:0]   ram [16383:0] /*verilator public*/;
 /* verilator lint_on MULTIDRIVEN */
 
+// BRAM 初始化：综合时将程序固化到 BRAM
+// Vivado/PDS 综合器支持 $readmemh 设置 BRAM INIT 值
+// 文件路径相对于 Vivado 工程目录，或使用绝对路径
+// 仿真时若文件不存在会产生警告但不影响功能
+initial $readmemh("program.hex", ram);
+
 reg [31:0] ram_read0_q;
 reg [31:0] ram_read1_q;
 
