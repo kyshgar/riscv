@@ -1,0 +1,5 @@
+isa_sim/obj/
+top_tcm_axi/tb/obj_dir/
+top_tcm_axi/tb/obj/
+top_cache_axi/tb/obj_dir/
+top_cache_axi/tb/obj/

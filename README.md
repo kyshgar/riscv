@@ -11,6 +11,9 @@ This core has been tested against a co-simulation model and exercised on FPGA.
 ## Overview
 ![](doc/overview.png)
 
+For a full module-by-module architecture walkthrough (Chinese), see:
+- [`doc/ARCHITECTURE.md`](doc/ARCHITECTURE.md)
+
 ## Features
 * 32-bit RISC-V ISA CPU core.
 * Support RISC-V integer (I), multiplication and division (M), and CSR instructions (Z) extensions (RV32IMZicsr).
